@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Id": "org.arche.silus.acid",
+    "Name": "Silus — Sandbox audit complete",
+    "Description": "Smiley acid temporaire",
+    "Icon": "face-smile-big",
+    "Version": "0.0.1",
+    "License": "MIT"
+  },
+  "KPackageStructure": "Plasma/Applet",
+  "X-Plasma-API-Minimum-Version": "6.0"
+}

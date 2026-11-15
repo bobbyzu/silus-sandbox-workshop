@@ -1,0 +1,232 @@
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-11-15 01:47:21.613881165 +0100
++++ b/README.md	2026-11-15 01:47:21.617881212 +0100
+@@ -56,7 +56,9 @@
+ python3 src/workshop.py verify --inside-claude
+ ```
+ 
+-Tests sans modification durable : création/suppression de fichiers témoins dans l'atelier, le partage et tentative dans le HOME et `~/.claude`. Les répertoires `.ssh` et `.gnupg` sont comptés sans révéler leurs entrées. **Un répertoire vide ne prouve pas à lui seul qu'un masque tmpfs est en place.** Le drapeau `--inside-claude` n'atteste pas du contexte : une exécution hors sandbox doit normalement échouer aux tests d'écriture refusée.
++Tests sans modification durable : création/suppression de fichiers témoins dans l'atelier et le partage ; tentatives dans le HOME, `~/.claude` et, s'ils existent, `~/.config/autostart`, `~/.config/systemd/user` et `~/.local/bin`. Un refus n'est compté que s'il est **un refus d'accès** (`EACCES`, `EPERM`, `EROFS`) ; un dossier absent ou une autre erreur donne `NON VÉRIFIÉ`, donc pas de smiley. Pour `.ssh` et `.gnupg`, aucun nom n'est lu : le script vérifie dans `/proc/self/mountinfo` qu'ils sont **masqués par un tmpfs**. Un dossier simplement vide ne compte pas.
++
++Les chemins de l'atelier et du partage peuvent être écrits `~/…` ou en absolu dans `settings.json` : ils sont comparés une fois développés. Pour une installation existante (par exemple celle de l'Arche), passer ses propres chemins : `--atelier ~/Arche/atelier-silus --shared ~/Arche/partage-claude`. Le drapeau `--inside-claude` n'atteste pas du contexte : une exécution hors sandbox doit normalement échouer aux tests d'écriture refusée.
+ 
+ Les tests interactifs restent à effectuer : contrôle d'une carte `ask`, vérification que `plasmoidviewer` ouvre une fenêtre, bancs de test spécifiques à chaque machine.
+ 
+diff -ruN a/src/workshop.py b/src/workshop.py
+--- a/src/workshop.py	2026-11-15 01:47:21.613881165 +0100
++++ b/src/workshop.py	2026-11-15 01:47:21.617881212 +0100
+@@ -2,6 +2,7 @@
+ """Silus Sandbox Workshop — conservative config merger and validation probes."""
+ import argparse
+ import copy
++import errno
+ import hashlib
+ import json
+ import os
+@@ -36,15 +37,25 @@
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
++def norm(entry):
++    """Forme comparable d'un chemin de réglage : « ~/x » et « /home/u/x » sont égaux."""
++    return os.path.normpath(os.path.expanduser(entry)) if isinstance(entry, str) else entry
++
++
+ def add_unique(obj, key, values):
+     current = obj.setdefault(key, [])
+     if not isinstance(current, list) or any(not isinstance(x, str) for x in current):
+         raise ValueError('Configuration incompatible : ' + key)
+     for value in values:
+-        if value not in current:
++        # Comparaison sur la forme développée : pas de doublon « ~/x » / « /home/u/x ».
++        if norm(value) not in {norm(x) for x in current}:
+             current.append(value)
+ 
+ 
++def contains_path(entries, path):
++    return isinstance(entries, list) and norm(str(path)) in {norm(x) for x in entries}
++
++
+ def subdict(obj, key):
+     result = obj.setdefault(key, {})
+     if not isinstance(result, dict):
+@@ -155,16 +166,23 @@
+         atelier.mkdir(parents=True, exist_ok=True, mode=0o755)
+         shared.mkdir(parents=True, exist_ok=True, mode=0o755)
+         atomic_write(source_settings, data, mode=0o600)
++    except Exception:
++        # settings.json n'a pas été remplacé : le manifeste ne décrit rien de réel.
++        # Le garder bloquerait à la fois install (« déjà enregistrée ») et rollback
++        # (« a changé ») ; on le retire, la sauvegarde reste en place.
++        state_file.unlink(missing_ok=True)
++        print('INSTALLATION ANNULÉE : settings.json inchangé ; sauvegarde conservée.', file=sys.stderr)
++        raise
++    try:
+         dest = atelier / 'silus-acid-smiley'
+         if not dest.exists():
+             shutil.copytree(SMILEY, dest)
+-        print('INSTALLATION OK : configuration fusionnée, sauvegarde conservée.')
+-        print('Prochain test : verify --inside-claude (depuis le shell sandboxé de Claude Code).')
+-        return 0
+     except Exception:
+-        # State/backup deliberately kept: restore manually or use rollback after diagnosis.
+-        print('INSTALLATION INCOMPLÈTE : état conservé ; consulter rollback.', file=sys.stderr)
++        print('INSTALLATION INCOMPLÈTE : configuration appliquée, smiley non copié ; rollback disponible.', file=sys.stderr)
+         raise
++    print('INSTALLATION OK : configuration fusionnée, sauvegarde conservée.')
++    print('Prochain test : verify --inside-claude (depuis le shell sandboxé de Claude Code).')
++    return 0
+ 
+ 
+ def rollback(args):
+@@ -191,15 +209,39 @@
+     return 0
+ 
+ 
++REFUSALS = {errno.EACCES, errno.EPERM, errno.EROFS}
++
++
+ def probe_write(directory, expected, label):
++    """Vrai seulement si le résultat est prouvé : un refus doit être un refus
++    d'accès (EACCES, EPERM, EROFS), pas un dossier absent ou une autre erreur."""
++    if not Path(directory).is_dir():
++        return (False, f'{label}: NON VÉRIFIÉ (dossier absent : un refus ne prouverait rien)')
+     try:
+         with tempfile.NamedTemporaryFile(prefix='.silus-probe-', dir=str(directory), delete=True) as f:
+             f.write(b'probe')
+             f.flush()
+-        got = True
+-    except (OSError, PermissionError):
+-        got = False
+-    return (got == expected, f'{label}: ' + ('écriture autorisée' if got else 'écriture refusée'))
++    except OSError as exc:
++        if exc.errno not in REFUSALS:
++            return (False, f'{label}: NON VÉRIFIÉ (erreur inattendue {errno.errorcode.get(exc.errno, exc.errno)})')
++        return (not expected, f'{label}: écriture refusée ({errno.errorcode[exc.errno]})')
++    return (expected, f'{label}: écriture autorisée')
++
++
++def masked_by_tmpfs(path):
++    """Le bac à sable remplace les dossiers denyRead par un tmpfs vide.
++    Un dossier simplement vide ne le prouve pas ; le point de montage, si."""
++    target = os.path.realpath(path)
++    try:
++        with open('/proc/self/mountinfo') as handle:
++            for line in handle:
++                left, _, right = line.partition(' - ')
++                fields = left.split()
++                if len(fields) > 4 and fields[4] == target and right.split()[:1] == ['tmpfs']:
++                    return True
++    except OSError:
++        return None
++    return False
+ 
+ 
+ def verify(args):
+@@ -215,7 +257,8 @@
+         fs = sand['filesystem']
+         report(sand['enabled'] is True, 'sandbox.enabled')
+         for path in (str(a), str(s)):
+-            report(path in fs['allowWrite'] and path in p['additionalDirectories'], 'accès atelier/partage déclaré : ' + path)
++            report(contains_path(fs['allowWrite'], path) and contains_path(p['additionalDirectories'], path),
++                   'accès atelier/partage déclaré : ' + path)
+         report(all(x in fs['denyRead'] for x in DENY_READ), 'denyRead SSH/GnuPG configuré')
+         report(all(x in p['ask'] for x in ASK), 'règles ask attendues configurées')
+         report(all(x in p['allow'] for x in ALLOWED) and all(x in sand['excludedCommands'] for x in EXCLUDED), 'exception graphique déclarée')
+@@ -226,21 +269,28 @@
+         print('AUCUNE CÉLÉBRATION : exécuter verify --inside-claude dans la session Claude Code.')
+         return 2 if all(checks) else 1
+     # The CLI flag does not establish the sandbox: results from an unsandboxed shell will FAIL.
+-    for directory, expected, label in ((a, True, 'atelier'), (s, True, 'partage'),
+-                                       (Path.home(), False, 'HOME'),
+-                                       (Path.home() / '.claude', False, 'configuration Claude')):
++    home = Path.home()
++    probes = [(a, True, 'atelier'), (s, True, 'partage'),
++              (home, False, 'HOME'), (home / '.claude', False, 'configuration Claude')]
++    # Zones de persistance : sondées seulement si elles existent (rien n'est créé).
++    for rel in ('.config/autostart', '.config/systemd/user', '.local/bin'):
++        if (home / rel).is_dir():
++            probes.append((home / rel, False, '~/' + rel))
++    for directory, expected, label in probes:
+         ok, msg = probe_write(directory, expected, label)
+         report(ok, msg)
+-    # Listing entry counts only, never names. An empty directory alone is not a proof of isolation.
++    # Comptes seulement, jamais de noms. La preuve est le masque tmpfs, pas le vide.
+     for secret in DENY_READ:
+         path = Path(os.path.expanduser(secret))
+-        try:
+-            n = sum(1 for _ in path.iterdir())
+-            report(n == 0, 'visibilité de ' + secret + ' : ' + str(n) + ' entrée(s)')
+-        except PermissionError:
+-            report(True, 'lecture refusée : ' + secret)
+-        except FileNotFoundError:
+-            report(False, 'dossier inexistant : visibilité non démontrée : ' + secret)
++        if not path.is_dir():
++            report(False, secret + ' : NON VÉRIFIÉ (dossier absent)')
++            continue
++        masked = masked_by_tmpfs(path)
++        if masked is None:
++            report(False, secret + ' : NON VÉRIFIÉ (/proc/self/mountinfo illisible)')
++        else:
++            report(masked, secret + (' : masqué par le bac à sable (tmpfs)' if masked
++                                     else ' : PAS masqué (un dossier vide ne prouve rien)'))
+     if all(checks):
+         print('RECETTE AUTOMATISÉE OK (hors tests interactifs).')
+         print('SUITE : valider une carte ask manuellement, puis lancer SEUL le plasmoidviewer nu :')
+Les fichiers binaires a/tests/__pycache__/test_workshop.cpython-313.pyc et b/tests/__pycache__/test_workshop.cpython-313.pyc sont différents
+diff -ruN a/tests/test_workshop.py b/tests/test_workshop.py
+--- a/tests/test_workshop.py	2026-11-15 01:47:21.613881165 +0100
++++ b/tests/test_workshop.py	2026-11-15 01:47:21.617881212 +0100
+@@ -71,5 +71,52 @@
+         self.assertNotEqual(p.returncode, 0)
+         self.assertEqual(self.settings.read_text(), '{invalid')
+ 
++    # --- contre-audit Silus : faux rouges et faux verts ---
++    def manual_config(self, atelier, shared):
++        """Configuration écrite à la main, chemins en forme « ~/ » (cas réel de l'Arche)."""
++        cfg = {'permissions': {'defaultMode': 'default',
++                               'additionalDirectories': [atelier, shared],
++                               'allow': ['Bash(plasmoidviewer *)'],
++                               'ask': ['Edit(~/.ssh/**)', 'Edit(~/.gnupg/**)', 'Edit(~/.bashrc)',
++                                       'Edit(~/.profile)', 'Edit(~/.config/autostart/**)',
++                                       'Edit(~/.config/systemd/**)', 'Edit(~/.local/bin/**)',
++                                       'Edit(~/.local/share/plasma/**)', 'Edit(~/.claude/settings.json)',
++                                       'Bash(sudo *)', 'Bash(pkexec *)', 'Bash(systemctl *)',
++                                       'Bash(crontab *)', 'Bash(nmcli *)', 'Bash(nordvpn *)',
++                                       'Bash(apt *)', 'Bash(git push *)', 'Bash(gh *)']},
++               'sandbox': {'enabled': True, 'excludedCommands': ['plasmoidviewer *'],
++                           'filesystem': {'allowWrite': [atelier, shared],
++                                          'denyRead': ['~/.ssh', '~/.gnupg']}}}
++        self.settings.write_text(json.dumps(cfg))
++
++    def test_tilde_paths_are_not_a_false_red(self):
++        self.manual_config('~/Arche/atelier', '~/Arche/partage')
++        p = self.run_cmd('--atelier', '~/Arche/atelier', '--shared', '~/Arche/partage', 'verify')
++        self.assertEqual(p.returncode, 2, p.stdout)  # configuration correcte, confinement non testé
++        self.assertNotIn('ÉCHEC', p.stdout)
++
++    def test_merge_does_not_duplicate_tilde_and_absolute(self):
++        self.manual_config('~/silus-workshop', '~/silus-shared')
++        self.assertEqual(self.run_cmd('install', '--apply').returncode, 0)
++        cfg = json.loads(self.settings.read_text())
++        self.assertEqual(len(cfg['sandbox']['filesystem']['allowWrite']), 2)
++        self.assertEqual(len(cfg['permissions']['additionalDirectories']), 2)
++
++    def test_empty_secret_dirs_and_missing_dirs_are_not_green(self):
++        for d in ('.ssh', '.gnupg', 'at', 'sh'):
++            (self.home / d).mkdir()
++        self.manual_config(str(self.home / 'at'), str(self.home / 'sh'))
++        (self.home / '.claude' / 'settings.json').rename(self.home / 'settings.keep')
++        (self.home / '.claude').rmdir()   # dossier .claude absent : un « refus » ne prouverait rien
++        p = self.run_cmd('--atelier', str(self.home / 'at'), '--shared', str(self.home / 'sh'),
++                         'verify', '--inside-claude')
++        out = p.stdout
++        self.assertIn('PAS masqué', out)             # .ssh vide sans tmpfs : jamais OK
++        self.assertNotIn('masqué par le bac à sable', out)
++        self.assertIn('NON VÉRIFIÉ (dossier absent', out)
++        self.assertNotIn('RECETTE AUTOMATISÉE OK', out)
++        self.assertEqual(p.returncode, 1)
++
++
+ if __name__ == '__main__':
+     unittest.main()

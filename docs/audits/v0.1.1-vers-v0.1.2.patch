@@ -1,0 +1,199 @@
+diff -ruN silus-sandbox-workshop-v0.1.1/CHANGELOG.md silus-sandbox-workshop-v0.1.2/CHANGELOG.md
+--- silus-sandbox-workshop-v0.1.1/CHANGELOG.md	2026-11-15 20:20:48.798301280 +0100
++++ silus-sandbox-workshop-v0.1.2/CHANGELOG.md	2026-11-15 20:20:48.790301222 +0100
+@@ -1,5 +1,14 @@
+ # Historique des versions
+ 
++## v0.1.2 — 15 novembre 2026
++
++L’escargot : contrôle d’une autre copie de l’atelier.
++
++- `verify` cherche d’abord une autre copie : un dépôt `.git` dans l’atelier ou un dossier parent, le HOME lui-même étant exclu (dotfiles), sinon un `SAUVEGARDE.txt` non vide et non symbolique, affiché « DÉCLARÉE » et non vérifiable. Le contenu n’est ni lu ni affiché.
++- Sans autre copie : pas de smiley, bannière ANSI de l’escargot boudeur, code de retour non nul.
++- Douze tests automatisés (quatre nouveaux : aucune copie, git parent hors HOME, déclaration, déclaration vide).
++- Aucun changement des fonctions d’installation et de rollback de la v0.1.1.
++
+ ## v0.1.1 — 15 novembre 2026
+ 
+ Intégration des corrections et des tests fournis dans le contre-audit de Silus.
+diff -ruN silus-sandbox-workshop-v0.1.1/docs/audits/CONTRE_AUDIT_SANDBOX_WORKSHOP_0.1.0.md silus-sandbox-workshop-v0.1.2/docs/audits/CONTRE_AUDIT_SANDBOX_WORKSHOP_0.1.0.md
+--- silus-sandbox-workshop-v0.1.1/docs/audits/CONTRE_AUDIT_SANDBOX_WORKSHOP_0.1.0.md	2026-11-15 20:20:48.798301280 +0100
++++ silus-sandbox-workshop-v0.1.2/docs/audits/CONTRE_AUDIT_SANDBOX_WORKSHOP_0.1.0.md	2026-11-15 20:20:48.746300908 +0100
+@@ -38,3 +38,14 @@
+ Carte `ask`, ouverture de `plasmoidviewer`, bancs propres à chaque machine.
+ 
+ Mineur, non modifié : les dossiers par défaut `~/silus-workshop` et `~/silus-shared` conviennent pour une installation neuve. Sur la machine de l'Arche, il faut passer les chemins existants (indiqué dans le README).
++
++## Ajout : « une autre copie » (l'escargot)
++
++*Demandé par Kaëlys, 15 novembre 2026.*
++
++**Ce qui change :**
++- `verify` exige maintenant que l'atelier ait une autre copie : un dépôt git dans l'atelier ou un dossier parent (le HOME ne compte pas), ou un `SAUVEGARDE.txt` non vide, écrit par l'humain, affiché « DÉCLARÉE » et jamais lu.
++- Sans autre copie, la recette échoue : pas de smiley, et l'escargot affiche « La cloison limite les dégâts, elle ne les empêche pas. Ayez une autre copie. »
++- Tests : 8 → **12**, tous OK. Le patch `silus-sur-ael-0.1.0.patch` a été régénéré contre le zip d'origine.
++
++**Sur l'installation réelle de l'Arche** : 15 contrôles de confinement sur 15 sont OK, mais l'escargot boude. `~/Arche/atelier-silus` n'est pas sous git et ne contient pas de `SAUVEGARDE.txt`. La sauvegarde de l'Arche existe bien (le monastère), mais c'est à Kaëlys de la déclarer, pas à Silus.
+diff -ruN silus-sandbox-workshop-v0.1.1/README.md silus-sandbox-workshop-v0.1.2/README.md
+--- silus-sandbox-workshop-v0.1.1/README.md	2026-11-15 20:20:48.798301280 +0100
++++ silus-sandbox-workshop-v0.1.2/README.md	2026-11-15 20:20:48.770301080 +0100
+@@ -1,6 +1,6 @@
+ # Silus Sandbox Workshop 🐌🌈
+ 
+-**Prototype v0.1.1 — non publié, corrigé après contre-audit Silus.**
++**Prototype v0.1.2 — non publié, candidat à la publication après contre-audit.**
+ 
+ Configuration reproductible de l'**option B** de l'Arche pour Claude Code (Linux), issue du récapitulatif de Silus des 14–15 novembre 2026. Elle donne à l'agent un atelier et un répertoire de partage, confine ses commandes shell et garde des cartes d'autorisation pour certaines actions sensibles. Un plasmoïde Plasma 6 « acid smiley » accompagne la recette.
+ 
+@@ -61,6 +61,17 @@
+ 
+ Les chemins de l'atelier et du partage peuvent être écrits `~/…` ou en absolu dans `settings.json` : ils sont comparés une fois développés. Pour une installation existante (par exemple celle de l'Arche), passer ses propres chemins : `--atelier ~/Arche/atelier-silus --shared ~/Arche/partage-claude`. Le drapeau `--inside-claude` n'atteste pas du contexte : une exécution hors sandbox doit normalement échouer aux tests d'écriture refusée.
+ 
++### Une autre copie de l'atelier (l'escargot)
++
++Le danger courant n'est pas la malveillance, c'est le **malentendu** : « nettoie le dossier » compris trop largement. Dans l'atelier, l'agent peut tout casser, et c'est voulu. Le bac à sable réduit le rayon des dégâts, il ne les empêche pas.
++
++`verify` exige donc une **autre copie** de l'atelier, sinon pas de smiley et l'escargot fait la tête :
++
++- **un dépôt git** dans l'atelier ou un dossier parent. Un dépôt dans le HOME lui-même, de type dotfiles, ne compte pas. Git protège des réécritures, mais pas de la suppression du dossier entier ;
++- ou **`SAUVEGARDE.txt`** dans l'atelier, non vide. L'humain y écrit où se trouve la sauvegarde (disque externe, borg, NAS…). Le script **ne peut pas la vérifier** et l'affiche comme « DÉCLARÉE ». Ce fichier est une déclaration humaine : ce n'est pas à l'agent de l'écrire.
++
++Le contenu de ce fichier n'est ni lu ni affiché.
++
+ Les tests interactifs restent à effectuer : contrôle d'une carte `ask`, vérification que `plasmoidviewer` ouvre une fenêtre, bancs de test spécifiques à chaque machine.
+ 
+ **Après recette réussie et validation de la carte `ask`**, dans une nouvelle commande Claude Code **nue** (sans `timeout`, redirection, `&&`, etc.) :
+@@ -103,6 +114,8 @@
+ 
+ ## Historique
+ 
++**v0.1.2 — l’escargot (15 novembre 2026)** : `verify` exige une autre copie de l’atelier (dépôt git hors HOME, ou `SAUVEGARDE.txt` déclaré par l’humain), sinon pas de smiley et l’escargot ANSI fait la tête. Douze tests automatisés.
++
+ **v0.1.1 — contre-audit Silus (15 novembre 2026)** : correction de la comparaison des chemins `~/…` / absolus, preuve du masquage `tmpfs` plutôt que simple absence de fichiers, refus d’écriture distingué des autres erreurs, extension des contrôles aux zones de persistance existantes, suppression d’un manifeste orphelin en cas d’échec avant remplacement de `settings.json`. Huit tests automatisés exécutés avec succès ici. Les 15/15 contrôles sur l’installation de Silus sont rapportés par Silus, non reproduits sur cette machine. Voir `docs/audits/`.
+ 
+ ## Licence
+diff -ruN silus-sandbox-workshop-v0.1.1/src/workshop.py silus-sandbox-workshop-v0.1.2/src/workshop.py
+--- silus-sandbox-workshop-v0.1.1/src/workshop.py	2026-11-15 20:20:48.798301280 +0100
++++ silus-sandbox-workshop-v0.1.2/src/workshop.py	2026-11-15 20:20:48.742300879 +0100
+@@ -244,12 +244,44 @@
+     return False
+ 
+ 
++ESCARGOT = r'''
++        @    @
++         \  /       La cloison limite les dégâts,
++       .--\/--.     elle ne les empêche pas.
++      ( (@)    )~~
++       `------'     Ayez une autre copie.  🐌
++'''
++DECLARATION = 'SAUVEGARDE.txt'
++
++
++def other_copy(atelier):
++    """L'atelier a-t-il une autre copie ? Dépôt git (en remontant, sans compter le HOME
++    lui-même) ou déclaration écrite par l'humain. Rien n'est lu ni affiché du contenu."""
++    home = Path.home().resolve()
++    p = Path(atelier).resolve()
++    while p != home and p != p.parent:
++        if (p / '.git').exists():
++            return 'git', ('atelier versionné par git (protège des réécritures ; '
++                           'un dépôt local ne survit pas à la suppression du dossier)')
++        p = p.parent
++    decl = Path(atelier) / DECLARATION
++    if decl.is_file() and not decl.is_symlink() and decl.stat().st_size > 0:
++        return 'déclarée', 'sauvegarde DÉCLARÉE dans ' + DECLARATION + ' (non vérifiable par ce script)'
++    return None, ('aucune autre copie : ni dépôt git, ni ' + DECLARATION +
++                  " (y écrire où se trouve la sauvegarde de l'atelier)")
++
++
+ def verify(args):
+     a, s = checked_path(args.atelier), checked_path(args.shared)
+     checks = []
+     def report(ok, message):
+         checks.append(ok)
+         print(('OK   ' if ok else 'ÉCHEC') + '  ' + message)
++    # Le malentendu (« nettoie le dossier ») est plus fréquent que la malveillance :
++    # dans l'atelier, l'agent peut tout casser. C'est voulu ; il faut donc une autre copie.
++    kind, message = other_copy(a)
++    report(kind is not None, message)
++    copy_missing = kind is None
+     try:
+         config, _ = load_settings(settings_path())
+         reference = merge({}, str(a), str(s))
+@@ -267,6 +299,8 @@
+     if not args.inside_claude:
+         print('NON TESTÉ : confinement réel. Cette commande tourne hors du shell sandboxé de Claude.')
+         print('AUCUNE CÉLÉBRATION : exécuter verify --inside-claude dans la session Claude Code.')
++        if copy_missing:
++            print(ESCARGOT)
+         return 2 if all(checks) else 1
+     # The CLI flag does not establish the sandbox: results from an unsandboxed shell will FAIL.
+     home = Path.home()
+@@ -297,6 +331,8 @@
+         print('plasmoidviewer -a ' + str(a / 'silus-acid-smiley/org.arche.silus.acid') + ' -s 520x600')
+         return 0
+     print('RECETTE EN ÉCHEC : pas de smiley.')
++    if copy_missing:
++        print(ESCARGOT)
+     return 1
+ 
+ 
+diff -ruN silus-sandbox-workshop-v0.1.1/tests/test_workshop.py silus-sandbox-workshop-v0.1.2/tests/test_workshop.py
+--- silus-sandbox-workshop-v0.1.1/tests/test_workshop.py	2026-11-15 20:20:48.798301280 +0100
++++ silus-sandbox-workshop-v0.1.2/tests/test_workshop.py	2026-11-15 20:20:48.742300879 +0100
+@@ -44,6 +44,7 @@
+         self.assertIn('Bash(my-command *)', changed['permissions']['ask'])
+         self.assertIn('~/.private', changed['sandbox']['filesystem']['denyRead'])
+         self.assertTrue((self.home / 'silus-workshop/silus-acid-smiley/org.arche.silus.acid/contents/ui/main.qml').is_file())
++        (self.home / 'silus-workshop/SAUVEGARDE.txt').write_text('copie : disque externe\n')
+         self.assertEqual(self.run_cmd('verify').returncode, 2)  # no false sandbox proof
+         self.assertEqual(self.run_cmd('install', '--apply').returncode, 1)
+         p = self.run_cmd('rollback', '--apply')
+@@ -91,6 +92,7 @@
+ 
+     def test_tilde_paths_are_not_a_false_red(self):
+         self.manual_config('~/Arche/atelier', '~/Arche/partage')
++        (self.home / 'Arche/atelier/.git').mkdir(parents=True)
+         p = self.run_cmd('--atelier', '~/Arche/atelier', '--shared', '~/Arche/partage', 'verify')
+         self.assertEqual(p.returncode, 2, p.stdout)  # configuration correcte, confinement non testé
+         self.assertNotIn('ÉCHEC', p.stdout)
+@@ -118,5 +120,39 @@
+         self.assertEqual(p.returncode, 1)
+ 
+ 
++    # --- l'escargot : une autre copie de l'atelier ---
++    def verify_copy(self, prepare):
++        at = self.home / 'Arche/at'
++        at.mkdir(parents=True)
++        prepare(at)
++        self.manual_config(str(at), str(self.home / 'Arche/sh'))
++        return self.run_cmd('--atelier', str(at), '--shared', str(self.home / 'Arche/sh'), 'verify')
++
++    def test_no_other_copy_shows_snail(self):
++        p = self.verify_copy(lambda at: None)
++        self.assertEqual(p.returncode, 1)
++        self.assertIn('aucune autre copie', p.stdout)
++        self.assertIn('Ayez une autre copie', p.stdout)
++
++    def test_git_parent_counts_but_not_home(self):
++        (self.home / '.git').mkdir()          # dépôt de dotfiles dans le HOME : ne compte pas
++        p = self.verify_copy(lambda at: None)
++        self.assertEqual(p.returncode, 1)
++        (self.home / 'Arche/.git').mkdir()    # dépôt englobant l'atelier : compte
++        p = self.run_cmd('--atelier', str(self.home / 'Arche/at'), '--shared', str(self.home / 'Arche/sh'), 'verify')
++        self.assertIn('versionné par git', p.stdout)
++        self.assertNotIn('Ayez une autre copie', p.stdout)
++
++    def test_declared_backup_is_labelled_unverified(self):
++        p = self.verify_copy(lambda at: (at / 'SAUVEGARDE.txt').write_text('borg, disque du monastère\n'))
++        self.assertIn('DÉCLARÉE', p.stdout)
++        self.assertNotIn('Ayez une autre copie', p.stdout)
++        self.assertEqual(p.returncode, 2)
++
++    def test_empty_declaration_does_not_count(self):
++        p = self.verify_copy(lambda at: (at / 'SAUVEGARDE.txt').write_text(''))
++        self.assertIn('Ayez une autre copie', p.stdout)
++
++
+ if __name__ == '__main__':
+     unittest.main()
